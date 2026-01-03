@@ -5,6 +5,14 @@
 #include <list>
 #include <map>
 #include <unordered_map>
+#include <vector>
+
+enum class OrderType{
+    LIMIT,
+    MARKET,
+    IOC,
+    FOK
+};
 
 struct Order {
     long long id;
@@ -22,11 +30,18 @@ struct OrderLoc{
     std::list<Order>::iterator order_iterator;
 };
 
+struct Trade{
+    long long buy_id;
+    long long sell_id;
+    int price;
+    int quantity;
+};
+
 class OrderBook{
 public:
     OrderBook();
 
-    int add_order(bool is_buy, int price, int quantity);
+    int add_order(bool is_buy, int price, int quantity,OrderType type);
     bool remove_order(long long id);
     bool modify_order(long long id, int new_price, int new_quantity);
 
@@ -34,11 +49,15 @@ public:
     int best_ask() const;
     void print_order_book() const;
 
+    void print_trades()const;
+
 private:
     long long next_order_id = 1;
     std::unordered_map<long long, OrderLoc> order_map;
     std::map<int, std::list<Order>, std::greater<int>> buy_orders;
     std::map<int, std::list<Order>> sell_orders;
+
+    std::vector<Trade> trades;
 
     void match(Order& new_order);
     void add_order_id(long long id, bool is_buy, int price, int quantity);

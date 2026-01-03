@@ -6,7 +6,7 @@ OrderBook::OrderBook(){
     order_map.reserve(200000);
 }
 
-int OrderBook::add_order(bool is_buy, int price, int quantity){
+int OrderBook::add_order(bool is_buy, int price, int quantity, OrderType type){
     if(quantity <= 0){
         std::cerr << "Quantity cannot be negative. Failed.\n";
         return -1;
@@ -17,6 +17,10 @@ int OrderBook::add_order(bool is_buy, int price, int quantity){
     match(new_order);
 
     if(new_order.quantity > 0){
+
+        if(type == OrderType::MARKET){
+            return id;
+        }
         if(is_buy){
             auto& level = buy_orders[price];
             level.emplace_back(id,is_buy,price,new_order.quantity);
@@ -118,6 +122,22 @@ void OrderBook::print_order_book() const{
     std::cout<<"==========================\n";
 }
 
+void OrderBook::print_trades()const{
+    if(trades.empty()){
+        std::cout<<"No Trades yet.\n";
+        return;
+    }
+    std::cout<<"======= Trade Log =======\n";
+    for(const auto& t:trades){
+        std::cout<<"Trade "
+            <<t.buy_id<<" "
+            <<t.sell_id<<" "
+            <<t.price<<" "
+            <<t.quantity<<"\n";
+    }
+    std::cout<<"========================\n";
+}
+
 void OrderBook::match(Order& new_order){
     if(new_order.quantity <= 0) return;
 
@@ -140,6 +160,9 @@ void OrderBook::match(Order& new_order){
                         << sell_order.id <<" " 
                         << ask_price <<" "
                         << trade_quantity <<"\n";
+                
+                trades.push_back({new_order.id,sell_order.id,ask_price,trade_quantity});
+
                 if(sell_order.quantity == 0){
                     order_map.erase(sell_order.id);
                     level.pop_front();
@@ -168,6 +191,9 @@ void OrderBook::match(Order& new_order){
                         << new_order.id <<" "
                         << bid_price <<" "
                         << trade_quantity<<"\n";
+
+                trades.push_back({buy_order.id,new_order.id,bid_price,trade_quantity});
+
                 if(buy_order.quantity==0){
                     order_map.erase(buy_order.id);
                     level.pop_front();

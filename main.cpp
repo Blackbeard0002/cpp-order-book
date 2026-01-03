@@ -7,19 +7,30 @@ int main(){
 
     std::string cmd;
     std::cout << "Welcome to the Order Book System!\n";
-    std::cout << "Available commands: ADD, REMOVE, MODIFY, BEST, PRINT, EXIT\n";
+    std::cout << "Available commands: ADD, REMOVE, MODIFY, BEST, PRINT, TRADES, EXIT\n";
     
     while(std::cin>>cmd){
         if(cmd == "ADD"){
             std::string side;
             int price, quantity;
-            std::cin >> side >> price >> quantity;
+            std::string price_str;
+            std::cin >> side >> price_str >> quantity;
+
+            OrderType type;
             if(side != "BUY" && side != "SELL"){
                 std::cout << "Invalid side. Use BUY or SELL.\n";
                 continue;
             }else{
                 bool is_buy = (side == "BUY");
-                int id = ob.add_order(is_buy, price, quantity);
+                if(price_str == "MKT"){
+                    type = OrderType::MARKET;
+                    price = is_buy?1e9:0;
+                }else{
+                    type = OrderType::LIMIT;
+                    price = std::stoi(price_str);
+                }
+                
+                int id = ob.add_order(is_buy, price, quantity,type);
                 if(id != -1){
                     std::cout << "Order Accepted. ID: " << id << "\n";
                 }else{
@@ -63,6 +74,8 @@ int main(){
         }else if(cmd == "EXIT"){
             std::cout << "Exiting the Order Book System. Goodbye!\n";
             break;
+        }else if(cmd == "TRADES"){
+            ob.print_trades();
         }else{
             std::cout << "Unknown command. Please try again.\n";
         }
