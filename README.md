@@ -75,10 +75,10 @@ The engine includes a built-in benchmark mode to measure limit-order throughput.
 
 Command:
 
-BENCH 100000
+```BENCH 100000
 
 Sample result:
-Throughput: ~5.3 million orders/sec
+```Throughput: ~5.3 million orders/sec
 
 Logging is disabled during benchmarking to ensure measurements reflect matching and data-structure performance rather than I/O overhead.
 
