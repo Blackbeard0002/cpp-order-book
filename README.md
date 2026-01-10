@@ -85,12 +85,12 @@ Logging is disabled during benchmarking to ensure measurements reflect matching 
 ## Build and Run
 
 ### Compile (Windows)
-g++ -std=c++17 -O2 main.cpp order_book.cpp -o ob.exe
+```g++ -std=c++17 -O2 main.cpp order_book.cpp -o ob.exe```
 
 ### Run
-ob.exe
+```ob.exe```
 ### Run using input file
-ob.exe < test.txt
+```ob.exe < test.txt```
 
 ## Notes
 
