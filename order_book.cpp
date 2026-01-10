@@ -11,6 +11,12 @@ int OrderBook::add_order(bool is_buy, int price, int quantity, OrderType type){
         std::cerr << "Quantity cannot be negative. Failed.\n";
         return -1;
     }
+    
+    if(type == OrderType::FOK){
+        if(!can_fully_fill(is_buy,price,quantity)){
+            return -1;
+        }
+    }
     long long id = next_order_id++;
 
     Order new_order(id, is_buy, price, quantity);
@@ -18,7 +24,7 @@ int OrderBook::add_order(bool is_buy, int price, int quantity, OrderType type){
 
     if(new_order.quantity > 0){
 
-        if(type == OrderType::MARKET){
+        if(type == OrderType::MARKET || type == OrderType::IOC){
             return id;
         }
         if(is_buy){
@@ -90,6 +96,9 @@ int OrderBook::best_ask() const{
     }
     return sell_orders.begin()->first;
 }
+void OrderBook::set_logging(bool enabled){
+    enable_logging = enabled;
+}
 void OrderBook::print_order_book() const{
     std::cout << "======= Order Book =======\n";
     std::cout << "Bids(BUY)\n";
@@ -155,11 +164,14 @@ void OrderBook::match(Order& new_order){
                 int trade_quantity = std::min(new_order.quantity, sell_order.quantity);
                 new_order.quantity -= trade_quantity;
                 sell_order.quantity -= trade_quantity;
-                std::cout << "TRADE " 
-                        << new_order.id<<" "
-                        << sell_order.id <<" " 
-                        << ask_price <<" "
-                        << trade_quantity <<"\n";
+
+                if(enable_logging){
+                    std::cout << "TRADE " 
+                            << new_order.id<<" "
+                            << sell_order.id <<" " 
+                            << ask_price <<" "
+                            << trade_quantity <<"\n";
+                }
                 
                 trades.push_back({new_order.id,sell_order.id,ask_price,trade_quantity});
 
@@ -186,11 +198,14 @@ void OrderBook::match(Order& new_order){
                 int trade_quantity = std::min(buy_order.quantity,new_order.quantity);
                 buy_order.quantity-=trade_quantity;
                 new_order.quantity -= trade_quantity;
-                std::cout << "TRADE " 
-                        << buy_order.id <<" " 
-                        << new_order.id <<" "
-                        << bid_price <<" "
-                        << trade_quantity<<"\n";
+
+                if(enable_logging){
+                    std::cout << "TRADE " 
+                            << buy_order.id <<" " 
+                            << new_order.id <<" "
+                            << bid_price <<" "
+                            << trade_quantity<<"\n";
+                }
 
                 trades.push_back({buy_order.id,new_order.id,bid_price,trade_quantity});
 
@@ -230,4 +245,27 @@ void OrderBook::add_order_id(long long id, bool is_buy, int price, int quantity)
             order_map[id] = OrderLoc{false, price, it};
         }
     }
+}
+
+bool OrderBook::can_fully_fill(bool is_buy, int price, int quantity)const{
+    int remaining = quantity;
+
+    if(is_buy){
+        for(const auto&[ask_price, orders]:sell_orders){
+            if(ask_price > price)break;
+            for(const auto& order:orders){
+                remaining -= order.quantity;
+                if(remaining<=0)return true;
+            }
+        }
+    }else{
+        for(const auto&[bid_price, orders]:buy_orders){
+            if(bid_price < price)break;
+            for(const auto& order:orders){
+                remaining -= order.quantity;
+                if(remaining<=0)return true;
+            }
+        }
+    }
+    return false;
 }

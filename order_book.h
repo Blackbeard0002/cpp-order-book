@@ -51,7 +51,11 @@ public:
 
     void print_trades()const;
 
+    void set_logging(bool enabled);
+
 private:
+    bool enable_logging = true;
+
     long long next_order_id = 1;
     std::unordered_map<long long, OrderLoc> order_map;
     std::map<int, std::list<Order>, std::greater<int>> buy_orders;
@@ -61,6 +65,7 @@ private:
 
     void match(Order& new_order);
     void add_order_id(long long id, bool is_buy, int price, int quantity);
+    bool can_fully_fill(bool is_buy, int price,int quantity)const;
 };
 
 #endif // ORDER_BOOK_H
