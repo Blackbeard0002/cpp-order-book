@@ -1,6 +1,26 @@
+# Build output
+build/
+cmake-build-*/
+
+# Binaries
+ob
 *.exe
+*.out
+
+# Object files
 *.o
-a.exe
-ob.exe
-lob_test.exe
-ob_test.exe
+*.obj
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store

@@ -1,271 +1,178 @@
 #include "order_book.h"
-#include <iostream>
-#include <algorithm>
 
-OrderBook::OrderBook(){
-    order_map.reserve(200000);
+#include <iostream>
+
+OrderBook::OrderBook(std::size_t max_orders, std::size_t max_levels, std::size_t max_trades)
+    : order_pool_(max_orders),
+      level_pool_(max_levels),
+      order_by_id_(max_orders * 2),
+      trades_(max_trades) {
+    bids_.price_to_level.reserve(max_levels * 2);
+    asks_.price_to_level.reserve(max_levels * 2);
 }
 
-int OrderBook::add_order(bool is_buy, int price, int quantity, OrderType type){
-    if(quantity <= 0){
+int OrderBook::add_order(bool is_buy, int price, int quantity, OrderType type) {
+    if (quantity <= 0) [[unlikely]] {
         std::cerr << "Quantity cannot be negative. Failed.\n";
         return -1;
     }
-    
-    if(type == OrderType::FOK){
-        if(!can_fully_fill(is_buy,price,quantity)){
-            return -1;
-        }
+
+    if (type == OrderType::FOK && !can_fully_fill(is_buy, price, quantity)) [[unlikely]] {
+        return -1;
     }
-    long long id = next_order_id++;
 
-    Order new_order(id, is_buy, price, quantity);
-    match(new_order);
-
-    if(new_order.quantity > 0){
-
-        if(type == OrderType::MARKET || type == OrderType::IOC){
-            return id;
-        }
-        if(is_buy){
-            auto& level = buy_orders[price];
-            level.emplace_back(id,is_buy,price,new_order.quantity);
-            auto it = std::prev(level.end());
-            order_map[id] = OrderLoc{true, price, it};
-        }else{
-            auto & level = sell_orders[price];
-            level.emplace_back(id,is_buy,price,new_order.quantity);
-            auto it = std::prev(level.end());
-            order_map[id] = OrderLoc{false, price, it};
-        }
+    const std::int64_t id = next_order_id_++;
+    const std::uint32_t order_idx = order_pool_.acquire();
+    if (order_idx == ObjectPool<OrderNode>::kInvalid) [[unlikely]] {
+        return -1;
     }
+
+    OrderNode& order = order_pool_.get(order_idx);
+    order.id = id;
+    order.is_buy = is_buy;
+    order.price = price;
+    order.quantity = quantity;
+    order.prev = ObjectPool<OrderNode>::kInvalid;
+    order.next = ObjectPool<OrderNode>::kInvalid;
+
+    order_by_id_[id] = order_idx;
+
+    match(order_idx);
+
+    OrderNode& live = order_pool_.get(order_idx);
+    if (live.quantity > 0) {
+        if (type == OrderType::MARKET || type == OrderType::IOC) {
+            remove_order_at(order_idx);
+        } else {
+            BookSide& side = is_buy ? bids_ : asks_;
+            rest_order(order_idx, side, price);
+        }
+    } else {
+        order_by_id_.erase(id);
+        order_pool_.release(order_idx);
+    }
+
     return id;
-
 }
 
-bool OrderBook::remove_order(long long id){
-    auto it = order_map.find(id);
-    if(it==order_map.end())return false;
-
-    OrderLoc loc = it->second;
-
-    if(loc.is_buy){
-        auto it1 = buy_orders.find(loc.price);
-        if(it1 != buy_orders.end()){
-            auto & level = it1->second;
-            level.erase(loc.order_iterator);
-            if(level.empty()){
-                buy_orders.erase(it1);
-            }
-        }
-    }else{
-        auto it1 = sell_orders.find(loc.price);
-        if(it1 != sell_orders.end()){
-            auto & level = it1->second;
-            level.erase(loc.order_iterator);
-            if(level.empty()){
-                sell_orders.erase(it1);
-            }
-        }
+void OrderBook::add_order_with_id(std::int64_t id, bool is_buy, int price, int quantity) {
+    if (quantity <= 0) [[unlikely]] {
+        return;
     }
-    order_map.erase(it);
+    if (order_by_id_.find(id) != nullptr) [[unlikely]] {
+        return;
+    }
+
+    const std::uint32_t order_idx = order_pool_.acquire();
+    if (order_idx == ObjectPool<OrderNode>::kInvalid) [[unlikely]] {
+        return;
+    }
+
+    OrderNode& order = order_pool_.get(order_idx);
+    order.id = id;
+    order.is_buy = is_buy;
+    order.price = price;
+    order.quantity = quantity;
+    order.prev = ObjectPool<OrderNode>::kInvalid;
+    order.next = ObjectPool<OrderNode>::kInvalid;
+
+    order_by_id_[id] = order_idx;
+    match(order_idx);
+
+    OrderNode& live = order_pool_.get(order_idx);
+    if (live.quantity > 0) {
+        BookSide& side = is_buy ? bids_ : asks_;
+        rest_order(order_idx, side, price);
+    } else {
+        order_by_id_.erase(id);
+        order_pool_.release(order_idx);
+    }
+}
+
+bool OrderBook::remove_order(std::int64_t id) {
+    const std::uint32_t* idx = order_by_id_.find(id);
+    if (idx == nullptr) [[unlikely]] {
+        return false;
+    }
+    return remove_order_at(*idx);
+}
+
+bool OrderBook::modify_order(std::int64_t id, int new_price, int new_quantity) {
+    const std::uint32_t* idx = order_by_id_.find(id);
+    if (idx == nullptr) [[unlikely]] {
+        return false;
+    }
+
+    const OrderNode& existing = order_pool_.get(*idx);
+    const bool is_buy = existing.is_buy;
+
+    remove_order_at(*idx);
+    if (new_quantity <= 0) {
+        return true;
+    }
+    add_order_with_id(id, is_buy, new_price, new_quantity);
     return true;
 }
 
-bool OrderBook::modify_order(long long id, int new_price, int new_quantity){
-    auto it = order_map.find(id);
-    if(it==order_map.end())return false;
-    OrderLoc loc = it->second;
-    bool is_buy = loc.is_buy;
-
-    remove_order(id);
-    if(new_quantity <=0)return true;
-    add_order_id(id,is_buy,new_price,new_quantity);
-    return true;
-}
-
-int OrderBook::best_bid() const{
-    if(buy_orders.empty()){
+int OrderBook::best_bid() const {
+    if (bids_.best_level == ObjectPool<PriceLevel>::kInvalid) {
         return -1;
     }
-    return buy_orders.begin()->first;
+    return level_pool_.get(bids_.best_level).price;
 }
-int OrderBook::best_ask() const{
-    if(sell_orders.empty()){
+
+int OrderBook::best_ask() const {
+    if (asks_.best_level == ObjectPool<PriceLevel>::kInvalid) {
         return -1;
     }
-    return sell_orders.begin()->first;
+    return level_pool_.get(asks_.best_level).price;
 }
-void OrderBook::set_logging(bool enabled){
-    enable_logging = enabled;
-}
-void OrderBook::print_order_book() const{
+
+void OrderBook::set_logging(bool enabled) { enable_logging_ = enabled; }
+
+void OrderBook::print_order_book() const {
     std::cout << "======= Order Book =======\n";
     std::cout << "Bids(BUY)\n";
-    if(buy_orders.empty()){
+
+    if (bids_.best_level == ObjectPool<PriceLevel>::kInvalid) {
         std::cout << "...<empty>...\n";
-    }else{
-        std::cout<<"Price       Qty\n";
-        for(const auto& [price, orders] : buy_orders){
-            long long total = 0;
-            for(const auto& order : orders){
-                total += order.quantity;
-            }
-            std::cout<<price<<"         "<<total<<"\n";
+    } else {
+        std::cout << "Price       Qty\n";
+        std::uint32_t level_idx = bids_.best_level;
+        while (level_idx != ObjectPool<PriceLevel>::kInvalid) {
+            const PriceLevel& level = level_pool_.get(level_idx);
+            std::cout << level.price << "         " << level.total_qty << "\n";
+            level_idx = level.next_worse;
         }
     }
+
     std::cout << "Asks(SELL)\n";
-    if(sell_orders.empty()){
-        std::cout << "...<empty>...\n";    
-    }else{
-        std::cout<<"Price       Qty\n";
-        for(const auto& [price, orders] : sell_orders){ 
-            long long total = 0;
-            for(const auto& order : orders){
-                total += order.quantity;
-            }
-            std::cout<<price<<"         "<<total<<"\n";
+    if (asks_.best_level == ObjectPool<PriceLevel>::kInvalid) {
+        std::cout << "...<empty>...\n";
+    } else {
+        std::cout << "Price       Qty\n";
+        std::uint32_t level_idx = asks_.best_level;
+        while (level_idx != ObjectPool<PriceLevel>::kInvalid) {
+            const PriceLevel& level = level_pool_.get(level_idx);
+            std::cout << level.price << "         " << level.total_qty << "\n";
+            level_idx = level.next_worse;
         }
     }
 
-    std::cout<<"==========================\n";
+    std::cout << "==========================\n";
 }
 
-void OrderBook::print_trades()const{
-    if(trades.empty()){
-        std::cout<<"No Trades yet.\n";
-        return;
-    }
-    std::cout<<"======= Trade Log =======\n";
-    for(const auto& t:trades){
-        std::cout<<"Trade "
-            <<t.buy_id<<" "
-            <<t.sell_id<<" "
-            <<t.price<<" "
-            <<t.quantity<<"\n";
-    }
-    std::cout<<"========================\n";
-}
-
-void OrderBook::match(Order& new_order){
-    if(new_order.quantity <= 0) return;
-
-    if(new_order.is_buy){
-        while(new_order.quantity >0 && !sell_orders.empty()){
-            auto best_ask_it = sell_orders.begin();
-            int ask_price = best_ask_it->first;
-
-            if(ask_price > new_order.price) break;
-
-            auto& level = best_ask_it->second;
-
-            while(new_order.quantity >0 && !level.empty()){
-                Order& sell_order = level.front();
-                int trade_quantity = std::min(new_order.quantity, sell_order.quantity);
-                new_order.quantity -= trade_quantity;
-                sell_order.quantity -= trade_quantity;
-
-                if(enable_logging){
-                    std::cout << "TRADE " 
-                            << new_order.id<<" "
-                            << sell_order.id <<" " 
-                            << ask_price <<" "
-                            << trade_quantity <<"\n";
-                }
-                
-                trades.push_back({new_order.id,sell_order.id,ask_price,trade_quantity});
-
-                if(sell_order.quantity == 0){
-                    order_map.erase(sell_order.id);
-                    level.pop_front();
-                }
-            }
-            if(level.empty()){
-                sell_orders.erase(best_ask_it);
-            }
-        }
-    }else{
-        while(new_order.quantity > 0 && !buy_orders.empty()){
-            auto best_bid_it = buy_orders.begin();
-            int bid_price = best_bid_it -> first;
-
-            if(bid_price < new_order.price)break;
-
-            auto& level = best_bid_it->second;
-            
-            while(new_order.quantity > 0 && !level.empty()){
-                Order& buy_order = level.front();
-                int trade_quantity = std::min(buy_order.quantity,new_order.quantity);
-                buy_order.quantity-=trade_quantity;
-                new_order.quantity -= trade_quantity;
-
-                if(enable_logging){
-                    std::cout << "TRADE " 
-                            << buy_order.id <<" " 
-                            << new_order.id <<" "
-                            << bid_price <<" "
-                            << trade_quantity<<"\n";
-                }
-
-                trades.push_back({buy_order.id,new_order.id,bid_price,trade_quantity});
-
-                if(buy_order.quantity==0){
-                    order_map.erase(buy_order.id);
-                    level.pop_front();
-                }
-            }
-            if(level.empty()){
-                buy_orders.erase(best_bid_it);
-            }
-        }
-    }
-}
-
-void OrderBook::add_order_id(long long id, bool is_buy, int price, int quantity){
-    if(quantity <= 0){
-        return;
-    }
-    if(order_map.find(id) != order_map.end()){
+void OrderBook::print_trades() const {
+    if (trade_count_ == 0) {
+        std::cout << "No Trades yet.\n";
         return;
     }
 
-    Order new_order(id, is_buy, price, quantity);
-    match(new_order);
-
-    if(new_order.quantity > 0){
-        if(is_buy){
-            auto &level = buy_orders[price];
-            level.emplace_back(id,is_buy,price,new_order.quantity);
-            auto it = std::prev(level.end());
-            order_map[id] = OrderLoc{true, price, it};
-        }else{
-            auto& level = sell_orders[price];
-            level.emplace_back(id,is_buy,price,new_order.quantity);
-            auto it  = std::prev(level.end());
-            order_map[id] = OrderLoc{false, price, it};
-        }
+    std::cout << "======= Trade Log =======\n";
+    for (std::size_t i = 0; i < trade_count_; ++i) {
+        const Trade& t = trades_[i];
+        std::cout << "Trade " << t.buy_id << " " << t.sell_id << " " << t.price << " "
+                  << t.quantity << "\n";
     }
-}
-
-bool OrderBook::can_fully_fill(bool is_buy, int price, int quantity)const{
-    int remaining = quantity;
-
-    if(is_buy){
-        for(const auto&[ask_price, orders]:sell_orders){
-            if(ask_price > price)break;
-            for(const auto& order:orders){
-                remaining -= order.quantity;
-                if(remaining<=0)return true;
-            }
-        }
-    }else{
-        for(const auto&[bid_price, orders]:buy_orders){
-            if(bid_price < price)break;
-            for(const auto& order:orders){
-                remaining -= order.quantity;
-                if(remaining<=0)return true;
-            }
-        }
-    }
-    return false;
+    std::cout << "========================\n";
 }

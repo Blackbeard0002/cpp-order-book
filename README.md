@@ -1,97 +1,110 @@
-# C++ Limit Order Book Matching Engine
+# C++ Limit Order Book
 
-A high-performance single-threaded limit order book (LOB) matching engine written in modern C++ (C++17), supporting multiple order types, price-time priority matching, trade logging, and throughput benchmarking.
+Single-threaded limit order book matching engine in C++17.
 
 ## Features
 
-- Supports multiple order types:
-  - LIMIT
-  - MARKET
-  - IOC (Immediate-Or-Cancel)
-  - FOK (Fill-Or-Kill)
+- Order types: LIMIT, MARKET, IOC, FOK
+- Price-time priority (FIFO within each price level)
+- Add, cancel, and modify orders
+- In-memory trade log
+- Built-in benchmark with throughput and latency percentiles
 
-- Price-time priority matching (FIFO within price levels)
+## Build
 
-- Partial fills where applicable
+```bash
+mkdir -p build && cd build
+cmake ..
+cmake --build . -j
+```
 
-- Order management:
-  - Add orders
-  - Cancel orders
-  - Modify orders
+Manual build:
 
-- Persistent trade log with replay support
+```bash
+g++ -std=c++17 -O3 -march=native -flto -Iinclude \
+    main.cpp order_book.cpp order_book_engine.cpp -o ob
+```
 
-- Built-in benchmark mode to measure matching throughput
+## Run
 
-## Design Overview
+Interactive CLI:
 
-The matching engine is built around a price-level order book with strict price-time priority.
+```bash
+./ob
+```
 
-- Orders are grouped by price levels.
-- Each price level maintains a FIFO queue.
-- Best bid and best ask are always accessible in O(1) time.
-- Orders are indexed by ID to allow fast cancellation and modification.
-- The matching engine processes incoming orders synchronously and guarantees deterministic execution order.
+Scripted input:
 
-## Core Data Structures
+```bash
+./ob < test.txt
+```
 
-| Component | Data Structure | Reason |
-|---------|---------------|--------|
-Buy side | `std::map<int, std::list<Order>, std::greater<int>>` | Fast best-bid lookup |
-Sell side | `std::map<int, std::list<Order>>` | Fast best-ask lookup |
-Price level | `std::list<Order>` | FIFO execution and O(1) erase |
-Order index | `std::unordered_map<OrderID, OrderLoc>` | O(1) cancel and modify |
-Trade log | `std::vector<Trade>` | Sequential execution history |
+### Commands
 
-## Order Type Semantics
+| Command | Example |
+|---------|---------|
+| Add limit order | `ADD BUY 100 10` |
+| Add with type | `ADD SELL 100 5 FOK` |
+| Market order | `ADD BUY MKT 10` |
+| Cancel | `REMOVE 3` |
+| Modify | `MODIFY 4 101 7` |
+| Best bid/ask | `BEST` |
+| Print book | `PRINT` |
+| Print trades | `TRADES` |
+| Benchmark | `BENCH 1000000` |
+| Quit | `EXIT` |
 
-- **LIMIT**  
-  Matches against the opposing book up to its limit price. Any remaining quantity rests in the book.
+## Order semantics
 
-- **MARKET**  
-  Matches immediately against the best available prices. Remaining quantity is discarded.
-
-- **IOC (Immediate-Or-Cancel)**  
-  Attempts immediate execution up to its limit price. Any unfilled quantity is cancelled.
-
-- **FOK (Fill-Or-Kill)**  
-  Executes only if the full quantity can be matched immediately. Otherwise, the order is cancelled without any trades.
-
-## Time Complexity
-
-| Operation | Complexity |
-|---------|------------|
-Add order | O(log P) |
-Cancel order | O(1) average |
-Modify order | O(log P) |
-Best bid / ask | O(1) |
-Matching | O(number of matched orders) |
-
-Where P is the number of price levels.
+- **LIMIT** — match, then rest any remainder in the book
+- **MARKET** — match immediately; unfilled quantity is discarded
+- **IOC** — match up to the limit; unfilled quantity is cancelled
+- **FOK** — fill entirely or reject with no trades
 
 ## Benchmark
 
-The engine includes a built-in benchmark mode to measure limit-order throughput.
+`BENCH N` runs `N` LIMIT orders with:
 
-Command:
+- 50/50 buy/sell split
+- uniform price in [90, 110]
+- uniform quantity in [1, 10]
+- RNG seed 42
+- 10,000-order warmup before timing
 
-```BENCH 100000```
+Logging is disabled during the timed section. Each `add_order` is timed individually; results include throughput and latency percentiles.
 
-Sample result:
-```Throughput: ~5.3 million orders/sec```
+Example on a typical Linux build (`-O3 -march=native -flto`):
 
-Logging is disabled during benchmarking to ensure measurements reflect matching and data-structure performance rather than I/O overhead.
+```
+Orders: 1000000
+Throughput: 15400000 ops/sec
+p50 <= 64 ns
+p99 <= 128 ns
+```
 
-## Build and Run
+Exact numbers vary by CPU and system load.
 
-### Compile (Windows)
-```g++ -std=c++17 -O2 main.cpp order_book.cpp -o ob.exe```
+## Layout
 
-### Run
-```ob.exe```
-### Run using input file
-```ob.exe < test.txt```
+```
+cpp-order-book/
+├── include/
+│   ├── flat_hash_map.hpp
+│   ├── latency_histogram.hpp
+│   └── object_pool.hpp
+├── order_book.h
+├── order_book.cpp
+├── order_book_engine.cpp
+├── main.cpp
+├── CMakeLists.txt
+└── test.txt
+```
 
-## Notes
+## Design notes
 
-This project focuses on correctness, clean design, and measurable performance rather than premature optimization. It is intended as a foundational matching engine suitable for further extensions such as multithreading, custom memory allocators, or market data simulation.
+- Orders and price levels live in pre-allocated object pools
+- Price levels are kept in sorted intrusive lists; best bid/ask is O(1)
+- Per-level FIFO queues use index-based doubly linked lists
+- Order lookup uses an open-addressing `FlatHashMap`
+- Trades are stored in a pre-sized in-memory buffer (no disk persistence)
+- Default pool sizes: 500k orders, 16k levels, 2M trades
