@@ -1,14 +1,11 @@
 #include "order_book.h"
 
 #include <iostream>
+#include <algorithm>
 
 namespace {
 
 constexpr std::uint32_t kInvalid = ObjectPool<OrderNode>::kInvalid;
-
-[[nodiscard]] int clamp_trade_qty(int a, int b) noexcept {
-    return a < b ? a : b;
-}
 
 }  // namespace
 
@@ -190,7 +187,7 @@ void OrderBook::match_against_asks(std::uint32_t incoming_idx) {
             const std::uint32_t resting_idx = level.head_order;
             OrderNode& resting = order_pool_.get(resting_idx);
 
-            const int trade_qty = clamp_trade_qty(incoming.quantity, resting.quantity);
+            const int trade_qty = std::min(incoming.quantity, resting.quantity);
             incoming.quantity -= trade_qty;
             resting.quantity -= trade_qty;
             level.total_qty -= trade_qty;
@@ -231,7 +228,7 @@ void OrderBook::match_against_bids(std::uint32_t incoming_idx) {
             const std::uint32_t resting_idx = level.head_order;
             OrderNode& resting = order_pool_.get(resting_idx);
 
-            const int trade_qty = clamp_trade_qty(incoming.quantity, resting.quantity);
+            const int trade_qty = std::min(incoming.quantity, resting.quantity);
             resting.quantity -= trade_qty;
             incoming.quantity -= trade_qty;
             level.total_qty -= trade_qty;
