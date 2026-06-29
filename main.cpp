@@ -13,6 +13,7 @@ struct BenchOrder {
     bool is_buy;
     int price;
     int quantity;
+    OrderType typ;
 };
 
 void run_benchmark(OrderBook& ob, int n) {
@@ -24,6 +25,7 @@ void run_benchmark(OrderBook& ob, int n) {
     std::uniform_int_distribution<int> price_dist(90, 110);
     std::uniform_int_distribution<int> qty_dist(1, 10);
     std::uniform_int_distribution<int> side_dist(0, 1);
+    std::uniform_int_distribution<int> type_dist(0,3);
 
     std::vector<BenchOrder> orders(static_cast<std::size_t>(n));
     for (int i = 0; i < n; ++i) {
@@ -31,6 +33,7 @@ void run_benchmark(OrderBook& ob, int n) {
             side_dist(rng) == 0,
             price_dist(rng),
             qty_dist(rng),
+            static_cast<OrderType>(type_dist(rng)),
         };
     }
 
@@ -38,7 +41,7 @@ void run_benchmark(OrderBook& ob, int n) {
     const int warmup_count = n < kWarmup ? n : kWarmup;
     for (int i = 0; i < warmup_count; ++i) {
         const BenchOrder& o = orders[static_cast<std::size_t>(i)];
-        ob.add_order(o.is_buy, o.price, o.quantity, OrderType::LIMIT);
+        ob.add_order(o.is_buy, o.price, o.quantity, o.typ);
     }
 
     LatencyHistogram histogram;
@@ -47,7 +50,7 @@ void run_benchmark(OrderBook& ob, int n) {
     for (int i = 0; i < n; ++i) {
         const BenchOrder& o = orders[static_cast<std::size_t>(i)];
         const auto t0 = clock::now();
-        ob.add_order(o.is_buy, o.price, o.quantity, OrderType::LIMIT);
+        ob.add_order(o.is_buy, o.price, o.quantity, o.typ);
         const auto t1 = clock::now();
         const auto ns = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count());
